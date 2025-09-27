@@ -1,0 +1,10 @@
+{
+  "name": "mc-launcher",
+  "version": "1.0.0",
+  "scripts": {
+    "start": "vite",
+    "build:web": "echo 'no-op: wasm built by CI'",
+    "deploy": "vercel --prod"
+  },
+  "devDependencies": {}
+}

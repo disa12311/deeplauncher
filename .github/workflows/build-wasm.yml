@@ -1,0 +1,105 @@
+name: Build WASM (wasm-pack) and publish artifacts
+
+# Trigger:
+# - on push to main (but ignore pushes that ONLY change public/wasm/** to avoid loops)
+# - manual dispatch with configurable inputs
+on:
+  push:
+    branches: [ "main" ]
+    paths-ignore:
+      - 'public/wasm/**'
+  workflow_dispatch:
+    inputs:
+      crate_path:
+        description: 'Path to Rust crate containing Cargo.toml (e.g. ".", "engine")'
+        required: false
+        default: '.'
+      out_dir:
+        description: 'wasm-pack output dir (relative to repo root)'
+        required: false
+        default: 'wasm/pkg'
+      public_wasm_dir:
+        description: 'Where to copy artifacts for Vercel (relative to repo root)'
+        required: false
+        default: 'public/wasm/pkg'
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    env:
+      # Use inputs if workflow_dispatch; fallback to defaults otherwise
+      CRATE_PATH: ${{ github.event.inputs.crate_path || '.' }}
+      OUT_DIR: ${{ github.event.inputs.out_dir || 'wasm/pkg' }}
+      PUBLIC_WASM_DIR: ${{ github.event.inputs.public_wasm_dir || 'public/wasm/pkg' }}
+    steps:
+      - name: Checkout (full)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Setup Rust toolchain (stable)
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+          override: true
+
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack (if not installed)
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            echo "Installing wasm-pack..."
+            curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+          else
+            echo "wasm-pack already installed"
+          fi
+
+      - name: Build with wasm-pack (release)
+        run: |
+          echo "Crate path: '${CRATE_PATH}'"
+          echo "Output dir: '${OUT_DIR}'"
+          # If crate is not root, use --manifest-path
+          if [ "${CRATE_PATH}" != "." ] && [ -f "${CRATE_PATH}/Cargo.toml" ]; then
+            wasm-pack build --manifest-path "${CRATE_PATH}/Cargo.toml" --target web --out-dir "${OUT_DIR}" --release
+          else
+            wasm-pack build --target web --out-dir "${OUT_DIR}" --release
+          fi
+
+      - name: Prepare public wasm dir and copy artifacts
+        run: |
+          echo "Preparing ${PUBLIC_WASM_DIR}"
+          mkdir -p "${PUBLIC_WASM_DIR}"
+          # copy and sync (delete removed files in destination)
+          rsync -av --delete "${OUT_DIR}/" "${PUBLIC_WASM_DIR}/"
+          echo "Copied wasm pkg -> ${PUBLIC_WASM_DIR}"
+
+      - name: Show artifact files (debug)
+        run: |
+          echo "List ${OUT_DIR}:"
+          ls -la "${OUT_DIR}" || true
+          echo "List ${PUBLIC_WASM_DIR}:"
+          ls -la "${PUBLIC_WASM_DIR}" || true
+
+      - name: Commit built artifacts back to repo (if changed)
+        env:
+          GIT_AUTHOR_NAME: "github-actions[bot]"
+          GIT_AUTHOR_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+        run: |
+          git config user.name "${GIT_AUTHOR_NAME}"
+          git config user.email "${GIT_AUTHOR_EMAIL}"
+          git add "${PUBLIC_WASM_DIR}"
+          # If there are staged changes, commit & push
+          if git diff --staged --quiet; then
+            echo "No artifact changes to commit."
+          else
+            git commit -m "ci: build wasm artifacts [skip ci]" || true
+            git push origin HEAD:main
+          fi
+
+      - name: Upload built pkg artifact (for workflow UI/download)
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: ${{ env.OUT_DIR }}
