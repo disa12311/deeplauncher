@@ -1,5 +1,6 @@
-name: Build WASM (wasm-pack) and upload artifacts
+name: Build WASM (auto-detect crate) and upload artifacts
 
+# Triggers: push to main (ignore changes inside public/wasm), or manual dispatch
 on:
   push:
     branches: [ "main" ]
@@ -7,10 +8,6 @@ on:
       - 'public/wasm/**'
   workflow_dispatch:
     inputs:
-      crate_path:
-        description: 'Path to Rust crate containing Cargo.toml (e.g. ".", "engine")'
-        required: false
-        default: '.'
       out_dir:
         description: 'wasm-pack output dir (relative to repo root)'
         required: false
@@ -20,7 +17,7 @@ on:
         required: false
         default: 'public/wasm/pkg'
       skip_cache:
-        description: 'Set to true to skip cache restore/save'
+        description: 'Set to true to skip cargo cache'
         required: false
         default: 'false'
 
@@ -28,16 +25,38 @@ jobs:
   build-wasm:
     runs-on: ubuntu-latest
     env:
-      CRATE_PATH: ${{ github.event.inputs.crate_path || '.' }}
       OUT_DIR: ${{ github.event.inputs.out_dir || 'wasm/pkg' }}
       PUBLIC_WASM_DIR: ${{ github.event.inputs.public_wasm_dir || 'public/wasm/pkg' }}
       SKIP_CACHE: ${{ github.event.inputs.skip_cache || 'false' }}
     steps:
-      - name: Checkout (full)
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
+
+      - name: Show repo root for debugging
+        run: |
+          echo "Workspace: $GITHUB_WORKSPACE"
+          ls -la .
+
+      - name: Auto-detect Cargo.toml (first match, excluding artifact folders)
+        id: detect
+        run: |
+          set -e
+          echo "Searching for Cargo.toml..."
+          CT=$(find . -type f -name Cargo.toml \
+            -not -path "./public/wasm/*" \
+            -not -path "./wasm/*" \
+            -not -path "./target/*" \
+            -not -path "./**/target/*" | sed -n '1p' || true)
+          if [ -z "$CT" ]; then
+            echo "No Cargo.toml found. Exiting."
+            exit 1
+          fi
+          CRATE_DIR=$(dirname "$CT")
+          echo "Found Cargo.toml at: $CT"
+          echo "crate_dir=$CRATE_DIR" >> $GITHUB_OUTPUT
 
       - name: Set up Rust stable
         uses: actions-rs/toolchain@v1
@@ -45,7 +64,7 @@ jobs:
           toolchain: stable
           override: true
 
-      - name: Cache cargo registry & index
+      - name: Optionally cache cargo registry & git (speeds up builds)
         if: env.SKIP_CACHE != 'true'
         uses: actions/cache@v4
         with:
@@ -68,27 +87,26 @@ jobs:
             echo "wasm-pack present: $(wasm-pack --version)"
           fi
 
-      - name: Show Rust/Cargo versions (debug)
+      - name: Show environment (debug)
         run: |
           rustc --version || true
           cargo --version || true
-          uname -a
-          lsb_release -a || true
+          wasm-pack --version || true
+          uname -a || true
 
-      - name: Build with wasm-pack (release)
+      - name: Build with wasm-pack (using detected crate)
         id: build
         run: |
-          echo "CRATE_PATH=${CRATE_PATH}"
-          echo "OUT_DIR=${OUT_DIR}"
           set -x
-          if [ "${CRATE_PATH}" != "." ] && [ -f "${CRATE_PATH}/Cargo.toml" ]; then
-            wasm-pack build --manifest-path "${CRATE_PATH}/Cargo.toml" --target web --out-dir "${OUT_DIR}" --release
+          CRATE_DIR="${{ steps.detect.outputs.crate_dir }}"
+          echo "Building crate in: $CRATE_DIR"
+          # If crate is not root, use --manifest-path
+          if [ "$CRATE_DIR" != "." ] && [ -f "${CRATE_DIR}/Cargo.toml" ]; then
+            wasm-pack build --manifest-path "${CRATE_DIR}/Cargo.toml" --target web --out-dir "${OUT_DIR}" --release
           else
             wasm-pack build --target web --out-dir "${OUT_DIR}" --release
           fi
-          echo "wasm-pack completed"
-        env:
-          RUSTFLAGS: "-C target-feature=+atomics,+bulk-memory,+mutable-globals"
+          echo "wasm-pack finished. Output dir: ${OUT_DIR}"
 
       - name: Prepare public wasm dir and copy artifacts
         run: |
@@ -96,21 +114,16 @@ jobs:
           mkdir -p "${PUBLIC_WASM_DIR}"
           rsync -av --delete "${OUT_DIR}/" "${PUBLIC_WASM_DIR}/"
           echo "Copied wasm pkg -> ${PUBLIC_WASM_DIR}"
+          echo "Contents of ${PUBLIC_WASM_DIR}:"
           ls -la "${PUBLIC_WASM_DIR}" || true
 
-      - name: Upload built pkg artifact
+      - name: Upload built pkg artifact for download
         uses: actions/upload-artifact@v4
         with:
           name: wasm-pkg
           path: ${{ env.OUT_DIR }}
 
-      - name: Print quick debug summary
-        if: failure()
+      - name: Final status
         run: |
-          echo "=== Build failed. Show last 200 lines of workflow log (if available) ==="
-          # no generic access to previous step logs here, but we'll print filesystem status
-          ls -la || true
-          echo "OUT_DIR contents:"
-          ls -la "${OUT_DIR}" || true
-          echo "PUBLIC_WASM_DIR contents:"
-          ls -la "${PUBLIC_WASM_DIR}" || true
+          echo "Build job completed. Artifact uploaded as 'wasm-pkg'."
+          echo "If you want CI to commit artifacts into repository automatically, re-run workflow with adjusted step (not recommended by default)."
