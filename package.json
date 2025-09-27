@@ -1,10 +1,18 @@
 {
-  "name": "mc-launcher",
+  "name": "deeplauncher",
   "version": "1.0.0",
+  "private": true,
+  "description": "Minecraft launcher + wasm packaging",
   "scripts": {
-    "start": "vite",
-    "build:web": "echo 'no-op: wasm built by CI'",
-    "deploy": "vercel --prod"
+    "build": "bash ./build.sh",
+    "clean": "rm -rf wasm pkg public/wasm || true",
+    "start": "npx serve public -l 3000",
+    "dev": "npx serve public -l 3000"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "serve": "^14.2.0"
+  },
+  "engines": {
+    "node": ">=16"
+  }
 }
