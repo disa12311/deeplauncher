@@ -21,14 +21,13 @@ if [ -z "$CRATE_TOML" ]; then
   exit 0
 fi
 
-CRATE_DIR=$(dirname "$CRATE_TOML")
+CRATE_DIR=$(dirname "${CRATE_TOML}")
 echo "[$(ts)] Found Rust crate at: ${CRATE_TOML} (dir: ${CRATE_DIR})"
 
 # Ensure rustup / rustc available (install non-interactive if missing)
 if ! command -v rustc >/dev/null 2>&1; then
   echo "[$(ts)] rustc not found — installing rustup (non-interactive)..."
   if command -v curl >/dev/null 2>&1; then
-    # install rustup non-interactively
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
     export PATH="$HOME/.cargo/bin:$PATH"
     echo "[$(ts)] rustup installed. rustc: $(rustc --version || true)"
@@ -67,13 +66,10 @@ rm -rf "${OUT_DIR}" "${PUBLIC_WASM_DIR}"
 
 # If wasm-pack exists, use it; else fallback to cargo+wasm-bindgen
 if command -v wasm-pack >/dev/null 2>&1; then
-  echo "[$(ts)] Building with wasm-pack..."
+  echo "[$(ts)] Building with wasm-pack (using crate dir)..."
   set -x
-  if [ "${CRATE_DIR}" != "." ]; then
-    wasm-pack build --manifest-path "${CRATE_TOML}" --target web --out-dir "${OUT_DIR}" --release
-  else
-    wasm-pack build --target web --out-dir "${OUT_DIR}" --release
-  fi
+  # use crate directory argument (more robust than --manifest-path in some envs)
+  wasm-pack build "${CRATE_DIR}" --target web --out-dir "${OUT_DIR}" --release
   set +x
   echo "[$(ts)] wasm-pack build finished."
 else
