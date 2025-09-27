@@ -10,7 +10,7 @@
     {
       "source": "/wasm/pkg/:all*",
       "headers": [
-        { "key": "Content-Type", "value": "application/wasm", "valueIsCaseSensitive": false },
+        { "key": "Content-Type", "value": "application/wasm" },
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
