@@ -3,8 +3,15 @@
     {
       "source": "/wasm/:all*",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" },
-        { "key": "Content-Type", "value": "application/wasm" }
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+      ]
+    },
+    {
+      "source": "/wasm/pkg/:all*",
+      "headers": [
+        { "key": "Content-Type", "value": "application/wasm", "valueIsCaseSensitive": false },
+        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
@@ -13,5 +20,7 @@
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     }
-  ]
+  ],
+  "cleanUrls": true,
+  "rewrites": []
 }
