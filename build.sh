@@ -1,119 +1,200 @@
 #!/usr/bin/env bash
-# build.sh — build Rust -> WASM (wasm-pack preferred, fallback to wasm-bindgen)
+# build.sh (improved)
+# - auto-detect Cargo.toml
+# - prefer wasm-pack, fallback to cargo+wasm-bindgen
+# - copy output to public/wasm/pkg (configurable)
+# - suitable for local dev or CI (Vercel)
+#
 # Usage:
-#   ./build.sh            # build release into ./wasm/pkg
-#   ./build.sh --debug    # build debug (non-release)
-#   ./build.sh --out dir  # set output dir
-#   ./build.sh --crate name  # optional crate name for wasm-bindgen fallback
+#   ./build.sh                  # auto-detect crate, release build
+#   ./build.sh --debug          # debug build (no --release)
+#   ./build.sh --crate engine   # use crate in ./engine
+#   OUT_DIR=wasm/pkg PUBLIC_WASM_DIR=public/wasm/pkg ./build.sh
+#   ./build.sh --force          # fail if no crate found
 #
 set -euo pipefail
 
-# defaults
-OUT_DIR="./wasm/pkg"
-BUILD_MODE="release"   # or "debug"
-CRATE_NAME=""           # optional, used for wasm-bindgen fallback if needed
+# --- defaults (can be overridden by env or args)
+OUT_DIR="${OUT_DIR:-wasm/pkg}"
+PUBLIC_WASM_DIR="${PUBLIC_WASM_DIR:-public/wasm/pkg}"
+BUILD_MODE="release"   # "release" or "debug"
+CRATE_PATH=""          # explicit crate path (directory)
+SKIP_INSTALL="false"   # if true, won't attempt to auto-install wasm-pack/rustup
+FORCE_FAIL="false"     # if true, exit non-zero when no Cargo.toml found
 
-print_usage() {
-  cat <<EOF
-Usage: $0 [--debug] [--out <dir>] [--crate <name>]
-  --debug        Build non-release (faster, not optimized)
-  --out <dir>    Output directory (default: ./wasm/pkg)
-  --crate <name> Crate name for wasm-bindgen fallback (optional)
-EOF
-  exit 1
-}
-
-# parse args
+# --- parse args
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --debug) BUILD_MODE="debug"; shift ;;
+    --crate) CRATE_PATH="$2"; shift 2 ;;
     --out) OUT_DIR="$2"; shift 2 ;;
-    --crate) CRATE_NAME="$2"; shift 2 ;;
-    -h|--help) print_usage ;;
-    *) echo "Unknown arg: $1"; print_usage ;;
+    --public) PUBLIC_WASM_DIR="$2"; shift 2 ;;
+    --skip-install) SKIP_INSTALL="true"; shift ;;
+    --force) FORCE_FAIL="true"; shift ;;
+    -h|--help)
+      cat <<EOF
+Usage: $0 [--debug] [--crate <path>] [--out <out_dir>] [--public <public_dir>] [--skip-install] [--force]
+  --debug         Build debug (no --release)
+  --crate <path>  Path to crate directory (where Cargo.toml is)
+  --out <dir>     wasm-pack out dir (default: ${OUT_DIR})
+  --public <dir>  copy artifacts to this public dir (default: ${PUBLIC_WASM_DIR})
+  --skip-install  don't auto-install rustup/wasm-pack
+  --force         exit with error if no Cargo.toml found
+EOF
+      exit 0
+      ;;
+    *)
+      echo "Unknown arg: $1"
+      exit 1
+      ;;
   esac
 done
 
-echo "=== Build script for game_engine WASM ==="
-echo "Build mode : $BUILD_MODE"
-echo "Output dir : $OUT_DIR"
-if [[ -n "$CRATE_NAME" ]]; then
-  echo "Crate name : $CRATE_NAME"
-fi
-echo
+# timestamp helper
+ts() { date +"%Y-%m-%d %H:%M:%S"; }
 
-# ensure target exists
-if ! rustup target list --installed | grep -q "^wasm32-unknown-unknown\$"; then
-  echo "[*] Installing wasm32-unknown-unknown target..."
-  rustup target add wasm32-unknown-unknown
-fi
+echo "[$(ts)] Starting build.sh"
+echo "[$(ts)] OUT_DIR=${OUT_DIR}, PUBLIC_WASM_DIR=${PUBLIC_WASM_DIR}, BUILD_MODE=${BUILD_MODE}"
+if [[ -n "${CRATE_PATH}" ]]; then echo "[$(ts)] Explicit crate path: ${CRATE_PATH}"; fi
+if [[ "${SKIP_INSTALL}" == "true" ]]; then echo "[$(ts)] SKIP_INSTALL=true (will not auto-install tools)"; fi
+if [[ "${FORCE_FAIL}" == "true" ]]; then echo "[$(ts)] FORCE_FAIL=true (will fail if no crate)"; fi
 
-# create output dir
-mkdir -p "$OUT_DIR"
-
-# prefer wasm-pack
-if command -v wasm-pack >/dev/null 2>&1; then
-  echo "[*] Using wasm-pack to build..."
-  # choose release or dev
-  if [[ "$BUILD_MODE" == "release" ]]; then
-    wasm-pack build --target web --out-dir "$OUT_DIR" --release
+# --- find Cargo.toml
+if [[ -n "${CRATE_PATH}" ]]; then
+  if [[ -f "${CRATE_PATH}/Cargo.toml" ]]; then
+    CRATE_TOML="${CRATE_PATH}/Cargo.toml"
   else
-    wasm-pack build --target web --out-dir "$OUT_DIR"
+    echo "[$(ts)] ERROR: Provided crate path '${CRATE_PATH}' does not contain Cargo.toml"
+    exit 1
   fi
-  echo "[+] wasm-pack build finished. Output in: $OUT_DIR"
+else
+  # search for first Cargo.toml, exclude typical build artifact folders
+  CRATE_TOML=$(find . -type f -name Cargo.toml \
+    -not -path "./public/wasm/*" \
+    -not -path "./wasm/*" \
+    -not -path "./target/*" \
+    -not -path "./node_modules/*" | sed -n '1p' || true)
+fi
+
+if [[ -z "${CRATE_TOML}" ]]; then
+  echo "[$(ts)] No Cargo.toml found in repo."
+  if [[ "${FORCE_FAIL}" == "true" ]]; then
+    echo "[$(ts)] Exiting due to --force."
+    exit 1
+  fi
+  # ensure public dir exists for consistent deployment
+  mkdir -p "${PUBLIC_WASM_DIR}"
+  echo "[$(ts)] Skipping wasm build. Created ${PUBLIC_WASM_DIR} (empty)."
+  echo "[$(ts)] Done."
   exit 0
 fi
 
-# fallback: use cargo + wasm-bindgen-cli (needs wasm-bindgen-cli installed)
-if command -v wasm-bindgen >/dev/null 2>&1; then
-  echo "[*] wasm-pack not found — using cargo + wasm-bindgen (fallback)."
+CRATE_DIR=$(dirname "${CRATE_TOML}")
+echo "[$(ts)] Found Cargo.toml at: ${CRATE_TOML} (crate dir: ${CRATE_DIR})"
+
+# --- ensure rust toolchain and wasm target (optionally auto-install)
+if ! command -v rustc >/dev/null 2>&1; then
+  if [[ "${SKIP_INSTALL}" == "true" ]]; then
+    echo "[$(ts)] ERROR: rustc not found and auto-install disabled (--skip-install)."
+    exit 1
+  fi
+  echo "[$(ts)] rustc not found — installing rustup (non-interactive)..."
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+  export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
+# add wasm target (no-op if already added)
+echo "[$(ts)] Ensuring wasm32-unknown-unknown target..."
+rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
+
+# --- ensure wasm-pack or wasm-bindgen available
+USE_WASM_PACK="false"
+if command -v wasm-pack >/dev/null 2>&1; then
+  echo "[$(ts)] wasm-pack found: $(wasm-pack --version || true)"
+  USE_WASM_PACK="true"
+else
+  if [[ "${SKIP_INSTALL}" == "true" ]]; then
+    echo "[$(ts)] wasm-pack not found and --skip-install set; will attempt wasm-bindgen fallback."
+    USE_WASM_PACK="false"
+  else
+    echo "[$(ts)] wasm-pack not found — installing wasm-pack (this may take some time)..."
+    if command -v curl >/dev/null 2>&1; then
+      curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+      export PATH="$HOME/.cargo/bin:$PATH"
+      if command -v wasm-pack >/dev/null 2>&1; then
+        echo "[$(ts)] wasm-pack installed: $(wasm-pack --version)"
+        USE_WASM_PACK="true"
+      else
+        echo "[$(ts)] wasm-pack installer did not produce binary; will try fallback."
+        USE_WASM_PACK="false"
+      fi
+    else
+      echo "[$(ts)] curl not available — cannot auto-install wasm-pack. Will try fallback."
+      USE_WASM_PACK="false"
+    fi
+  fi
+fi
+
+# if wasm-pack available use it
+if [[ "${USE_WASM_PACK}" == "true" ]]; then
+  echo "[$(ts)] Building with wasm-pack..."
+  # choose release or not
+  if [[ "${BUILD_MODE}" == "release" ]]; then
+    WP_FLAGS="--release"
+  else
+    WP_FLAGS=""
+  fi
+
+  set -x
+  if [[ "${CRATE_DIR}" != "." ]]; then
+    wasm-pack build --manifest-path "${CRATE_TOML}" --target web --out-dir "${OUT_DIR}" ${WP_FLAGS}
+  else
+    wasm-pack build --target web --out-dir "${OUT_DIR}" ${WP_FLAGS}
+  fi
+  set +x
+  echo "[$(ts)] wasm-pack build finished."
+else
+  # fallback: try cargo build + wasm-bindgen
+  echo "[$(ts)] wasm-pack not available — attempting cargo build + wasm-bindgen fallback."
+  if ! command -v wasm-bindgen >/dev/null 2>&1; then
+    if [[ "${SKIP_INSTALL}" == "true" ]]; then
+      echo "[$(ts)] ERROR: wasm-bindgen not found and auto-install disabled. Cannot build."
+      exit 1
+    fi
+    echo "[$(ts)] Installing wasm-bindgen-cli..."
+    cargo install -f wasm-bindgen-cli || true
+  fi
 
   # build with cargo
-  if [[ "$BUILD_MODE" == "release" ]]; then
-    cargo build --target wasm32-unknown-unknown --release
+  if [[ "${BUILD_MODE}" == "release" ]]; then
+    cargo build --target wasm32-unknown-unknown --manifest-path "${CRATE_TOML}" --release
     BUILD_ARTIFACT_PATH="target/wasm32-unknown-unknown/release"
   else
-    cargo build --target wasm32-unknown-unknown
+    cargo build --target wasm32-unknown-unknown --manifest-path "${CRATE_TOML}"
     BUILD_ARTIFACT_PATH="target/wasm32-unknown-unknown/debug"
   fi
 
-  # try to guess wasm file name
-  if [[ -n "$CRATE_NAME" ]]; then
-    WASM_FILE="$BUILD_ARTIFACT_PATH/$CRATE_NAME.wasm"
-  else
-    # attempt to auto-detect a single .wasm in build dir
-    WASM_COUNT=$(ls "$BUILD_ARTIFACT_PATH"/*.wasm 2>/dev/null | wc -l || true)
-    if [[ "$WASM_COUNT" -eq 1 ]]; then
-      WASM_FILE=$(ls "$BUILD_ARTIFACT_PATH"/*.wasm)
-    else
-      echo "[-] Can't auto-detect wasm file. Provide --crate <name> to build.sh"
-      echo "    Candidate files in $BUILD_ARTIFACT_PATH:"
-      ls -la "$BUILD_ARTIFACT_PATH" | sed -n '1,200p'
-      exit 1
-    fi
-  fi
-
-  if [[ ! -f "$WASM_FILE" ]]; then
-    echo "[-] wasm file not found at: $WASM_FILE"
+  # find wasm file
+  WASM_FILE=$(find "${BUILD_ARTIFACT_PATH}" -maxdepth 1 -type f -name "*.wasm" | sed -n '1p' || true)
+  if [[ -z "${WASM_FILE}" ]]; then
+    echo "[$(ts)] ERROR: no .wasm artifact found in ${BUILD_ARTIFACT_PATH}"
     exit 1
   fi
+  echo "[$(ts)] Found wasm artifact: ${WASM_FILE}"
 
-  echo "[*] Found wasm: $WASM_FILE"
-  echo "[*] Running wasm-bindgen to generate JS glue (target web) ..."
-  # output should be $OUT_DIR
-  mkdir -p "$OUT_DIR"
-  wasm-bindgen "$WASM_FILE" --out-dir "$OUT_DIR" --target web
-
-  echo "[+] wasm-bindgen finished. Output in: $OUT_DIR"
-  exit 0
+  # run wasm-bindgen
+  mkdir -p "${OUT_DIR}"
+  wasm-bindgen "${WASM_FILE}" --out-dir "${OUT_DIR}" --target web
+  echo "[$(ts)] wasm-bindgen output in ${OUT_DIR}"
 fi
 
-# If we reach here, neither wasm-pack nor wasm-bindgen available
-cat <<EOF
-[-] Neither 'wasm-pack' nor 'wasm-bindgen' found in PATH.
-    Install wasm-pack (recommended):
-      https://rustwasm.github.io/wasm-pack/installer/
-    or install wasm-bindgen-cli:
-      cargo install wasm-bindgen-cli
-EOF
-exit 2
+# --- copy/sync into public folder for Vercel
+echo "[$(ts)] Preparing ${PUBLIC_WASM_DIR}"
+mkdir -p "${PUBLIC_WASM_DIR}"
+rsync -av --delete "${OUT_DIR}/" "${PUBLIC_WASM_DIR}/"
+
+echo "[$(ts)] Files copied to ${PUBLIC_WASM_DIR}:"
+ls -la "${PUBLIC_WASM_DIR}" || true
+
+echo "[$(ts)] Build finished successfully."
+exit 0
