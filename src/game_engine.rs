@@ -1,9 +1,11 @@
+// src/game_engine.rs
 use wasm_bindgen::prelude::*;
-use web_sys::{CanvasRenderingContext2d, HtmlCanvasElement};
+use wasm_bindgen::JsCast;
+use web_sys::{window, HtmlCanvasElement, CanvasRenderingContext2d};
 
-// Đảm bảo khi có panic sẽ log ra console
+/// Install better panic messages on the JS console
 #[wasm_bindgen(start)]
-pub fn main_js() -> Result<(), JsValue> {
+pub fn wasm_start() -> Result<(), JsValue> {
     console_error_panic_hook::set_once();
     Ok(())
 }
@@ -21,19 +23,18 @@ pub struct GameEngine {
 
 #[wasm_bindgen]
 impl GameEngine {
+    /// Create engine from an existing canvas id (string)
     #[wasm_bindgen(constructor)]
     pub fn new(canvas_id: &str) -> Result<GameEngine, JsValue> {
-        // Lấy canvas từ DOM
-        let window = web_sys::window().unwrap();
-        let document = window.document().unwrap();
-        let canvas = document
+        let window = window().ok_or_else(|| JsValue::from_str("no window"))?;
+        let document = window.document().ok_or_else(|| JsValue::from_str("no document"))?;
+        let el = document
             .get_element_by_id(canvas_id)
-            .unwrap()
-            .dyn_into::<HtmlCanvasElement>()?;
-
+            .ok_or_else(|| JsValue::from_str("canvas not found"))?;
+        let canvas: HtmlCanvasElement = el.dyn_into::<HtmlCanvasElement>()?;
         let ctx = canvas
             .get_context("2d")?
-            .unwrap()
+            .ok_or_else(|| JsValue::from_str("failed to get 2d context"))?
             .dyn_into::<CanvasRenderingContext2d>()?;
 
         let width = canvas.width();
@@ -50,6 +51,7 @@ impl GameEngine {
         })
     }
 
+    /// Advance simple physics
     pub fn update(&mut self) {
         self.x += self.dx;
         self.y += self.dy;
@@ -62,12 +64,20 @@ impl GameEngine {
         }
     }
 
+    /// Render a simple frame (background + red square)
     pub fn render(&self) {
-        self.ctx.set_fill_style(&JsValue::from_str("black"));
-        self.ctx
-            .fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
+        // clear
+        self.ctx.set_fill_style(&JsValue::from_str("#000"));
+        self.ctx.fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
 
-        self.ctx.set_fill_style(&JsValue::from_str("red"));
+        // draw red square
+        self.ctx.set_fill_style(&JsValue::from_str("#e74c3c"));
         self.ctx.fill_rect(self.x - 10.0, self.y - 10.0, 20.0, 20.0);
+    }
+
+    /// Resize canvas information if you change canvas size from JS
+    pub fn resize(&mut self, w: u32, h: u32) {
+        self.width = w;
+        self.height = h;
     }
 }
