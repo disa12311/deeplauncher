@@ -2,6 +2,7 @@
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{window, HtmlCanvasElement, CanvasRenderingContext2d};
+use web_sys::CanvasFillStrokeStyles; // <-- import trait to use setters without deprecated warning
 
 /// Install better panic messages on the JS console
 #[wasm_bindgen(start)]
@@ -66,12 +67,12 @@ impl GameEngine {
 
     /// Render a simple frame (background + red square)
     pub fn render(&self) {
-        // clear
-        self.ctx.set_fill_style(&JsValue::from_str("#000"));
+        // clear (use JsValue)
+        self.ctx.set_fill_style(&wasm_bindgen::JsValue::from_str("#000"));
         self.ctx.fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
 
         // draw red square
-        self.ctx.set_fill_style(&JsValue::from_str("#e74c3c"));
+        self.ctx.set_fill_style(&wasm_bindgen::JsValue::from_str("#e74c3c"));
         self.ctx.fill_rect(self.x - 10.0, self.y - 10.0, 20.0, 20.0);
     }
 
