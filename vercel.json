@@ -1,23 +1,27 @@
 {
+  "buildCommand": "npm run prebuild && npm run build",
+  "outputDirectory": "public",
   "headers": [
     {
-      "source": "/wasm/:all*",
+      "source": "/wasm/(.*)",
       "headers": [
         { "key": "Content-Type", "value": "application/wasm" },
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "source": "/wasm/pkg/:all*",
+      "source": "/wasm/pkg/(.*)",
       "headers": [
         { "key": "Content-Type", "value": "application/wasm" },
         { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
       ]
     },
     {
-      "source": "/pkg/:all*",
+      "source": "/(.*\\.wasm)$",
       "headers": [
-        { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        { "key": "Content-Type", "value": "application/wasm" },
+        { "key": "Cross-Origin-Embedder-Policy", "value": "require-corp" },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" }
       ]
     }
   ],

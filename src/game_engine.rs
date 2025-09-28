@@ -10,6 +10,77 @@ pub fn wasm_start() -> Result<(), JsValue> {
     Ok(())
 }
 
+// Launcher functions that HTML expects
+#[wasm_bindgen]
+pub fn wasm_ready() -> String {
+    "WASM module loaded successfully".to_string()
+}
+
+#[wasm_bindgen]
+pub fn get_launch_url(version: &str) -> String {
+    match version {
+        "1.8" => "minecraft_1.8.html".to_string(),
+        "1.12" => "minecraft_1.12.html".to_string(),
+        _ => "index.html".to_string(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn list_versions() -> String {
+    "1.8,1.12".to_string()
+}
+
+#[wasm_bindgen]
+pub fn version_info(version: &str) -> String {
+    match version {
+        "1.8" => "Minecraft 1.8 - Classic PvP version".to_string(),
+        "1.12" => "Minecraft 1.12 - Modding friendly".to_string(),
+        _ => "Unknown version".to_string(),
+    }
+}
+
+// Thread-safe launcher callback storage
+use std::sync::Mutex;
+use std::sync::OnceLock;
+
+static LAUNCHER_CALLBACK: OnceLock<Mutex<Option<js_sys::Function>>> = OnceLock::new();
+
+#[wasm_bindgen]
+pub fn set_launcher_callback(callback: js_sys::Function) {
+    let callback_store = LAUNCHER_CALLBACK.get_or_init(|| Mutex::new(None));
+    if let Ok(mut cb) = callback_store.lock() {
+        *cb = Some(callback);
+    }
+}
+
+#[wasm_bindgen]
+pub fn start_engine(version: &str) -> JsValue {
+    let url = get_launch_url(version);
+    
+    // Try to call the JavaScript callback if set
+    let callback_store = LAUNCHER_CALLBACK.get_or_init(|| Mutex::new(None));
+    if let Ok(callback_guard) = callback_store.lock() {
+        if let Some(ref callback) = *callback_guard {
+            let this = JsValue::null();
+            let version_val = JsValue::from_str(version);
+            let url_val = JsValue::from_str(&url);
+            
+            if let Err(e) = callback.call2(&this, &version_val, &url_val) {
+                web_sys::console::log_1(&format!("Callback error: {:?}", e).into());
+            }
+        }
+    }
+    
+    // Return result object
+    let result = js_sys::Object::new();
+    js_sys::Reflect::set(&result, &"status".into(), &"success".into()).unwrap();
+    js_sys::Reflect::set(&result, &"url".into(), &url.into()).unwrap();
+    js_sys::Reflect::set(&result, &"version".into(), &version.into()).unwrap();
+    
+    result.into()
+}
+
+// Game Engine class for canvas rendering (unchanged)
 #[wasm_bindgen]
 pub struct GameEngine {
     width: u32,
