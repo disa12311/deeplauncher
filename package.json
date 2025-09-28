@@ -5,7 +5,7 @@
   "description": "Minecraft launcher + wasm packaging",
   "scripts": {
     "prebuild": "mkdir -p public && mkdir -p public/wasm/pkg && (test -f index.html && mv index.html public/ || true) && (test -f minecraft_1.8.html && mv minecraft_1.8.html public/ || true) && (test -f minecraft_1.12.html && mv minecraft_1.12.html public/ || true)",
-    "build": "bash ./build.sh",
+    "build": "PUBLIC_WASM_DIR=public/wasm/pkg bash ./build.sh",
     "clean": "rm -rf wasm pkg public/wasm || true",
     "start": "npx serve public -l 3000",
     "dev": "npx serve public -l 3000"
