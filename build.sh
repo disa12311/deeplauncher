@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# build.sh — robust for Vercel: isolate rustup/cargo homes to avoid $HOME/euid mismatch
+# build.sh — robust for Vercel: avoid HOME/euid mismatch by isolating homes
 set -euo pipefail
 
 OUT_DIR="${OUT_DIR:-wasm/pkg}"
 PUBLIC_WASM_DIR="${PUBLIC_WASM_DIR:-public/wasm/pkg}"
 
 ts(){ date +"%Y-%m-%d %H:%M:%S"; }
-echo "[$(ts)] build.sh (robust) OUT_DIR=${OUT_DIR} PUBLIC_WASM_DIR=${PUBLIC_WASM_DIR}"
+echo "[$(ts)] build.sh (robust HOME fix) OUT_DIR=${OUT_DIR} PUBLIC_WASM_DIR=${PUBLIC_WASM_DIR}"
 
-# locate crate (first Cargo.toml)
+# auto-detect crate
 CRATE_TOML=$(find . -type f -name Cargo.toml \
   -not -path "./public/wasm/*" \
   -not -path "./wasm/*" \
@@ -24,29 +24,32 @@ fi
 CRATE_DIR=$(dirname "${CRATE_TOML}")
 echo "[$(ts)] Found crate at: ${CRATE_TOML} (dir: ${CRATE_DIR})"
 
-# Use isolated directories inside workspace so rustup doesn't complain about HOME mismatch
-# (Vercel build can run as root while $HOME points to /vercel -> rustup checks mismatch)
+# isolate home directories inside the repo workspace to avoid rustup complaining
+# use a dedicated folder for cargo/rustup and set HOME to that folder during install
+WORKSPACE_HOME="${PWD}/.cargo_home"
 export RUSTUP_HOME="${PWD}/.rustup"
 export CARGO_HOME="${PWD}/.cargo"
+
+mkdir -p "${WORKSPACE_HOME}" "${RUSTUP_HOME}" "${CARGO_HOME}"
+# Temporarily set HOME to workspace-local folder so rustup-init won't complain about /root vs /vercel
+export HOME="${WORKSPACE_HOME}"
 export PATH="${CARGO_HOME}/bin:${PATH}"
 
-echo "[$(ts)] Using RUSTUP_HOME=${RUSTUP_HOME} CARGO_HOME=${CARGO_HOME}"
+echo "[$(ts)] Using HOME=${HOME}"
+echo "[$(ts)] RUSTUP_HOME=${RUSTUP_HOME}"
+echo "[$(ts)] CARGO_HOME=${CARGO_HOME}"
 
-# install rustup toolchain if rustc not present
+# Install rustup if rustc not present (installer will use our RUSTUP_HOME/CARGO_HOME because we exported them)
 if ! command -v rustc >/dev/null 2>&1; then
   echo "[$(ts)] rustc not found. Installing rustup into isolated home..."
   if command -v curl >/dev/null 2>&1; then
-    # Use rustup-init non-interactive. piping to sh is standard installer.
-    # Installer will write into RUSTUP_HOME/CARGO_HOME because we exported them above.
+    # use --no-modify-path so installer doesn't try to update profile files
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
-    # source cargo env if exists
+    # source cargo env if exists under our CARGO_HOME
     if [ -f "${CARGO_HOME}/env" ]; then
-      # older installers may create $CARGO_HOME/env
-      # source it if shell supports
       # shellcheck disable=SC1090
       . "${CARGO_HOME}/env"
     fi
-    # ensure PATH updated
     export PATH="${CARGO_HOME}/bin:${PATH}"
     echo "[$(ts)] rustup installed. rustc: $(rustc --version || true)"
   else
@@ -57,8 +60,8 @@ else
   echo "[$(ts)] rustc present: $(rustc --version)"
 fi
 
-# ensure wasm target
-echo "[$(ts)] Adding wasm32 target (idempotent)..."
+# add wasm target (idempotent)
+echo "[$(ts)] Adding wasm32 target..."
 rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
 
 # install wasm-pack into isolated cargo if missing
