@@ -25,12 +25,11 @@ fi
 CRATE_DIR=$(dirname "${CRATE_TOML}")
 echo "[$(ts)] Found crate at: ${CRATE_TOML} (dir: ${CRATE_DIR})"
 
-# isolate home dirs
-WORKSPACE_HOME="${PWD}/.cargo_home"
+# isolate home dirs - but keep original HOME for rustup
+ORIGINAL_HOME="${HOME}"
 export RUSTUP_HOME="${PWD}/.rustup"
 export CARGO_HOME="${PWD}/.cargo"
-mkdir -p "${WORKSPACE_HOME}" "${RUSTUP_HOME}" "${CARGO_HOME}"
-export HOME="${WORKSPACE_HOME}"
+mkdir -p "${RUSTUP_HOME}" "${CARGO_HOME}"
 export PATH="${CARGO_HOME}/bin:${PATH}"
 
 echo "[$(ts)] HOME=${HOME}"
@@ -41,7 +40,8 @@ echo "[$(ts)] CARGO_HOME=${CARGO_HOME}"
 if ! command -v rustc >/dev/null 2>&1; then
   echo "[$(ts)] rustc not found. Installing rustup..."
   if command -v curl >/dev/null 2>&1; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
+    # Use original HOME for rustup installation, but set custom RUSTUP_HOME and CARGO_HOME
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable
     if [ -f "${CARGO_HOME}/env" ]; then
       # shellcheck disable=SC1090
       . "${CARGO_HOME}/env"
@@ -64,11 +64,12 @@ rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
 if ! command -v wasm-pack >/dev/null 2>&1; then
   echo "[$(ts)] wasm-pack not found — installing..."
   if command -v curl >/dev/null 2>&1; then
-    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh -s -- --force
     export PATH="${CARGO_HOME}/bin:${PATH}"
     echo "[$(ts)] wasm-pack: $(wasm-pack --version || 'not found')"
   else
     echo "[$(ts)] ERROR: curl not available to install wasm-pack."
+    exit 1
   fi
 else
   echo "[$(ts)] wasm-pack present: $(wasm-pack --version || true)"
