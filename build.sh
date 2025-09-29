@@ -1,3 +1,4 @@
+cat > build.sh <<'EOF'
 #!/usr/bin/env bash
 # build.sh — robust: isolate homes, ensure wasm-pack writes to absolute out dir,
 # detect fallback pkg locations, and copy portable without rsync.
@@ -25,10 +26,12 @@ fi
 CRATE_DIR=$(dirname "${CRATE_TOML}")
 echo "[$(ts)] Found crate at: ${CRATE_TOML} (dir: ${CRATE_DIR})"
 
-# isolate home dirs - but keep original HOME for rustup
+# isolate home dirs
+WORKSPACE_HOME="${PWD}/.cargo_home"
 export RUSTUP_HOME="${PWD}/.rustup"
 export CARGO_HOME="${PWD}/.cargo"
-mkdir -p "${RUSTUP_HOME}" "${CARGO_HOME}"
+mkdir -p "${WORKSPACE_HOME}" "${RUSTUP_HOME}" "${CARGO_HOME}"
+export HOME="${WORKSPACE_HOME}"
 export PATH="${CARGO_HOME}/bin:${PATH}"
 
 echo "[$(ts)] HOME=${HOME}"
@@ -39,8 +42,7 @@ echo "[$(ts)] CARGO_HOME=${CARGO_HOME}"
 if ! command -v rustc >/dev/null 2>&1; then
   echo "[$(ts)] rustc not found. Installing rustup..."
   if command -v curl >/dev/null 2>&1; then
-    # Use original HOME for rustup installation, but set custom RUSTUP_HOME and CARGO_HOME
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path --default-toolchain stable
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --no-modify-path
     if [ -f "${CARGO_HOME}/env" ]; then
       # shellcheck disable=SC1090
       . "${CARGO_HOME}/env"
@@ -63,12 +65,11 @@ rustup target add wasm32-unknown-unknown >/dev/null 2>&1 || true
 if ! command -v wasm-pack >/dev/null 2>&1; then
   echo "[$(ts)] wasm-pack not found — installing..."
   if command -v curl >/dev/null 2>&1; then
-    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh -s -- --force
+    curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
     export PATH="${CARGO_HOME}/bin:${PATH}"
     echo "[$(ts)] wasm-pack: $(wasm-pack --version || 'not found')"
   else
     echo "[$(ts)] ERROR: curl not available to install wasm-pack."
-    exit 1
   fi
 else
   echo "[$(ts)] wasm-pack present: $(wasm-pack --version || true)"
@@ -77,7 +78,7 @@ fi
 # clean
 rm -rf "${OUT_DIR}" "${PUBLIC_WASM_DIR}"
 
-# compute absolute out dir (so wasm-pack doesn't create inside crate dir)
+# compute absolute out dir
 ABS_OUT_DIR="${PWD%/}/${OUT_DIR#./}"
 mkdir -p "${ABS_OUT_DIR}"
 
@@ -106,8 +107,7 @@ else
   echo "[$(ts)] wasm-bindgen output in ${ABS_OUT_DIR}"
 fi
 
-# ensure we have a pkg directory - sometimes old wasm-pack writes into crate_dir/wasm/pkg
-# check common alternate locations
+# locate actual pkg
 POSSIBLE_PKG_LOCATIONS=(
   "${ABS_OUT_DIR}"
   "${CRATE_DIR}/wasm/pkg"
@@ -125,31 +125,26 @@ done
 if [ -z "${ACTUAL_PKG}" ]; then
   echo "[$(ts)] Warning: no wasm pkg found in expected locations. Listing ${ABS_OUT_DIR}:"
   ls -la "${ABS_OUT_DIR}" || true
-  # still try to continue, create public dir
   mkdir -p "${PUBLIC_WASM_DIR}"
 else
   echo "[$(ts)] Found wasm pkg at: ${ACTUAL_PKG}"
-  # copy to public
   mkdir -p "${PUBLIC_WASM_DIR}"
   if command -v rsync >/dev/null 2>&1; then
     rsync -av --delete "${ACTUAL_PKG}/" "${PUBLIC_WASM_DIR}/"
   else
-    # cp fallback - ensure target dir is clean first
-    if [ -d "${PUBLIC_WASM_DIR}" ]; then 
-      rm -rf "${PUBLIC_WASM_DIR:?}"/* || true
-    fi
+    if [ -d "${PUBLIC_WASM_DIR}" ]; then rm -rf "${PUBLIC_WASM_DIR:?}/"* || true; fi
     mkdir -p "${PUBLIC_WASM_DIR}"
     if command -v cp >/dev/null 2>&1; then
-      cp -a "${ACTUAL_PKG}/." "${PUBLIC_WASM_DIR}/" || {
-        echo "[$(ts)] cp fallback failed, trying tar method..."
-        cd "${ACTUAL_PKG}" && tar cf - . | cd "${PUBLIC_WASM_DIR}" && tar xf -
-      }
+      cp -a "${ACTUAL_PKG}/." "${PUBLIC_WASM_DIR}/" || (cd "${ACTUAL_PKG}" && tar cf - .) | (cd "${PUBLIC_WASM_DIR}" && tar xf -)
     else
-      echo "[$(ts)] Using tar method for copy..."
-      cd "${ACTUAL_PKG}" && tar cf - . | cd "${PUBLIC_WASM_DIR}" && tar xf -
+      (cd "${ACTUAL_PKG}" && tar cf - .) | (cd "${PUBLIC_WASM_DIR}" && tar xf -)
     fi
   fi
   echo "[$(ts)] Artifacts copied to ${PUBLIC_WASM_DIR}"
 fi
 
 echo "[$(ts)] Done."
+EOF
+
+# make executable
+chmod +x build.sh
