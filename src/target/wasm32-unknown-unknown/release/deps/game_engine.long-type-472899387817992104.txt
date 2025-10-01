@@ -1,0 +1,1 @@
+OnceLock<std::sync::Mutex<Option<Function>>>
