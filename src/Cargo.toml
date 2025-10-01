@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [lib]
+name = "game_engine"
+path = "game_engine.rs"
 crate-type = ["cdylib"]
 
 [dependencies]
