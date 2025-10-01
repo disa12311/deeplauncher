@@ -14,7 +14,6 @@
       --accent2:#4caf50;
       --text:#e6eef6;
       --muted:#9fb0bf;
-      --glass: rgba(255,255,255,0.02);
     }
     *{box-sizing:border-box}
     html,body{height:100%;margin:0}
@@ -75,13 +74,11 @@
     .footer{color:var(--muted);font-size:13px;text-align:center;margin-top:6px}
     .hint{color:var(--muted);font-size:13px;margin-top:4px;text-align:center}
 
-    /* small */
     @media (max-width:520px){
       .btn{min-width:120px;padding:10px 16px}
       h1{font-size:20px}
     }
 
-    /* subtle enter animation */
     .fade-in { animation: fadeUp .36s ease both; }
     @keyframes fadeUp { from{opacity:0; transform: translateY(6px)} to{opacity:1; transform:none} }
   </style>
@@ -114,11 +111,9 @@
   </div>
 
   <script>
-    // target URLs (root)
     const url18 = '/minecraft_1.8.html';
     const url112 = '/minecraft_1.12.html';
 
-    // helper: insert prefetch link
     function prefetchLink(href) {
       try {
         if (document.querySelector('link[rel="prefetch"][href="' + href + '"]')) return;
@@ -127,22 +122,18 @@
         l.href = href;
         l.as = 'document';
         document.head.appendChild(l);
-      } catch (e) {
-        console.debug('prefetch failed', e);
-      }
+      } catch (e) { console.debug('prefetch failed', e); }
     }
 
-    // Cache API best-effort
     async function prefetchCache(href) {
       if (!('caches' in window)) return;
       try {
         const cache = await caches.open('dl-prefetch-v1');
         const r = await fetch(href, { credentials: 'same-origin' });
         if (r && r.ok) await cache.put(href, r.clone());
-      } catch (e) {}
+      } catch (e) { /* ignore */ }
     }
 
-    // smooth same-tab navigation
     function go(href) {
       document.body.style.transition = 'opacity .18s ease';
       document.body.style.opacity = '0';
@@ -157,17 +148,15 @@
     btn112.addEventListener('click', ()=> go(url112));
     btnBack.addEventListener('click', ()=> history.back());
 
-    // keyboard shortcuts
     window.addEventListener('keydown', (e)=>{
       if (e.repeat) return;
       const tag = document.activeElement && document.activeElement.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
-      if (e.key === '1' || e.key === '!' ) { btn18.click(); }
-      if (e.key === '2' || e.key === '@' ) { btn112.click(); }
+      if (e.key === '1' || e.key === '!') { btn18.click(); }
+      if (e.key === '2' || e.key === '@') { btn112.click(); }
       if (e.key === 'Escape') { history.back(); }
     });
 
-    // prefetch on hover / focus
     function attachPrefetch(el, href){
       const fn = () => { prefetchLink(href); prefetchCache(href); };
       el.addEventListener('pointerenter', fn, { passive:true });
@@ -180,7 +169,6 @@
     attachPrefetch(btn18, url18);
     attachPrefetch(btn112, url112);
 
-    // Accessibility live region
     function announce(msg){
       let el = document.getElementById('dl-live');
       if (!el) {
