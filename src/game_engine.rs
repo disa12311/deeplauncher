@@ -1,8 +1,9 @@
-cat > src/game_engine.rs <<'EOF'
+// src/game_engine.rs
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{window, HtmlCanvasElement, CanvasRenderingContext2d};
-use web_sys::CanvasFillStrokeStyles; // trait so setter resolves without deprecated warning
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 /// Install better panic messages on the JS console
 #[wasm_bindgen(start)]
@@ -11,6 +12,74 @@ pub fn wasm_start() -> Result<(), JsValue> {
     Ok(())
 }
 
+// Launcher functions for index.html
+#[wasm_bindgen]
+pub fn wasm_ready() -> String {
+    "WASM module loaded successfully".to_string()
+}
+
+#[wasm_bindgen]
+pub fn get_launch_url(version: &str) -> String {
+    match version {
+        "1.8" => "/minecraft_1.8.html".to_string(),
+        "1.12" => "/minecraft_1.12.html".to_string(),
+        _ => "/index.html".to_string(),
+    }
+}
+
+#[wasm_bindgen]
+pub fn list_versions() -> String {
+    "1.8,1.12".to_string()
+}
+
+#[wasm_bindgen]
+pub fn version_info(version: &str) -> String {
+    match version {
+        "1.8" => "Minecraft 1.8 - Classic PvP version".to_string(),
+        "1.12" => "Minecraft 1.12 - Modding friendly".to_string(),
+        _ => "Unknown version".to_string(),
+    }
+}
+
+// Thread-safe launcher callback storage
+static LAUNCHER_CALLBACK: OnceLock<Mutex<Option<js_sys::Function>>> = OnceLock::new();
+
+#[wasm_bindgen]
+pub fn set_launcher_callback(callback: js_sys::Function) {
+    let callback_store = LAUNCHER_CALLBACK.get_or_init(|| Mutex::new(None));
+    if let Ok(mut cb) = callback_store.lock() {
+        *cb = Some(callback);
+    }
+}
+
+#[wasm_bindgen]
+pub fn start_engine(version: &str) -> JsValue {
+    let url = get_launch_url(version);
+    
+    // Try to call the JavaScript callback if set
+    let callback_store = LAUNCHER_CALLBACK.get_or_init(|| Mutex::new(None));
+    if let Ok(callback_guard) = callback_store.lock() {
+        if let Some(ref callback) = *callback_guard {
+            let this = JsValue::null();
+            let version_val = JsValue::from_str(version);
+            let url_val = JsValue::from_str(&url);
+            
+            if let Err(e) = callback.call2(&this, &version_val, &url_val) {
+                web_sys::console::log_1(&format!("Callback error: {:?}", e).into());
+            }
+        }
+    }
+    
+    // Return result object
+    let result = js_sys::Object::new();
+    js_sys::Reflect::set(&result, &"status".into(), &"success".into()).unwrap();
+    js_sys::Reflect::set(&result, &"url".into(), &url.into()).unwrap();
+    js_sys::Reflect::set(&result, &"version".into(), &version.into()).unwrap();
+    
+    result.into()
+}
+
+// Game Engine class for canvas rendering
 #[wasm_bindgen]
 pub struct GameEngine {
     width: u32,
@@ -67,12 +136,12 @@ impl GameEngine {
 
     /// Render a simple frame (background + red square)
     pub fn render(&self) {
-        // clear
-        self.ctx.set_fill_style(&wasm_bindgen::JsValue::from_str("#000"));
+        // clear canvas with black background
+        self.ctx.set_fill_style(&JsValue::from_str("#000"));
         self.ctx.fill_rect(0.0, 0.0, self.width as f64, self.height as f64);
 
         // draw red square
-        self.ctx.set_fill_style(&wasm_bindgen::JsValue::from_str("#e74c3c"));
+        self.ctx.set_fill_style(&JsValue::from_str("#e74c3c"));
         self.ctx.fill_rect(self.x - 10.0, self.y - 10.0, 20.0, 20.0);
     }
 
@@ -82,4 +151,3 @@ impl GameEngine {
         self.height = h;
     }
 }
-EOF
