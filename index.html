@@ -110,18 +110,17 @@
     </div>
 
     <div class="hint">Bạn có thể di chuột để prefetch trang, hoặc nhấn phím <strong>1</strong> / <strong>2</strong>.</div>
-    <div class="footer">Phiên bản được lưu trữ tại <code>/deeplauncher/minecraft_1.8.html</code> và <code>/deeplauncher/minecraft_1.12.html</code></div>
+    <div class="footer">Phiên bản được lưu trữ tại <code>/minecraft_1.8.html</code> và <code>/minecraft_1.12.html</code></div>
   </div>
 
   <script>
-    // target URLs (relative)
-    const url18 = 'deeplauncher/minecraft_1.8.html';
-    const url112 = 'deeplauncher/minecraft_1.12.html';
+    // target URLs (root)
+    const url18 = '/minecraft_1.8.html';
+    const url112 = '/minecraft_1.12.html';
 
     // helper: insert prefetch link
     function prefetchLink(href) {
       try {
-        // do not duplicate
         if (document.querySelector('link[rel="prefetch"][href="' + href + '"]')) return;
         const l = document.createElement('link');
         l.rel = 'prefetch';
@@ -129,33 +128,27 @@
         l.as = 'document';
         document.head.appendChild(l);
       } catch (e) {
-        // ignore
         console.debug('prefetch failed', e);
       }
     }
 
-    // also try Cache API (best-effort)
+    // Cache API best-effort
     async function prefetchCache(href) {
       if (!('caches' in window)) return;
       try {
         const cache = await caches.open('dl-prefetch-v1');
         const r = await fetch(href, { credentials: 'same-origin' });
         if (r && r.ok) await cache.put(href, r.clone());
-      } catch (e) {
-        // ignore network errors
-      }
+      } catch (e) {}
     }
 
-    // navigation (same tab)
+    // smooth same-tab navigation
     function go(href) {
-      // small visual affordance — fade out
       document.body.style.transition = 'opacity .18s ease';
       document.body.style.opacity = '0';
-      // wait a tick for fade
       setTimeout(()=> location.href = href, 140);
     }
 
-    // wire buttons
     const btn18 = document.getElementById('btn18');
     const btn112 = document.getElementById('btn112');
     const btnBack = document.getElementById('btnBack');
@@ -179,7 +172,6 @@
       const fn = () => { prefetchLink(href); prefetchCache(href); };
       el.addEventListener('pointerenter', fn, { passive:true });
       el.addEventListener('focus', fn, { passive:true });
-      // also prefetch on long-press (hold)
       el.addEventListener('mousedown', (ev)=>{
         if (ev.button === 0) setTimeout(()=> prefetchCache(href), 250);
       }, { passive:true });
@@ -188,7 +180,7 @@
     attachPrefetch(btn18, url18);
     attachPrefetch(btn112, url112);
 
-    // Accessibility: announce navigation
+    // Accessibility live region
     function announce(msg){
       let el = document.getElementById('dl-live');
       if (!el) {
