@@ -1,9 +1,7 @@
-// src/game_engine.rs
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{window, HtmlCanvasElement, CanvasRenderingContext2d};
-use std::sync::Mutex;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 /// Install better panic messages on the JS console
 #[wasm_bindgen(start)]
